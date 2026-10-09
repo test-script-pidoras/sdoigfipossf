@@ -42,10 +42,12 @@ _G.Config = {
 
     Event = {
         AutoCollectDailies = true,
-        AutoUseCryptKeys = true,
+        AutoUseCryptKeys = false, 
+        AutoUseTwigs = false,
         FeedStrayCat = true,
-        AutoUseTwigs = true,
         PlayGhostClustersMinigame = true,
+        PlayHauntletMinigame = false,
+        UnlockSkelicorn = false
     }
 
 }
@@ -230,8 +232,7 @@ local _script = coroutine.create(function()
       ["_camp"] = {-25, 30, -1054},
       ["_playground"] = {-387, 31, -1750},
       ["_beach"] = {-670, 37, -1413},
-      ["_stray_cat"] = {-244, 90, -1123},
-      ['_ghost_cluster'] = {-5976.9, 10010.6, 9001.5}
+      ["_stray_cat"] = {-314, 30, -1447},
     },
     
     TasksByRarity = {
@@ -1490,7 +1491,7 @@ end
       
   function Mutable.Event.GetRustyCryptKeys(): number
     local keys = 0
-    for k,v in pairs(Mutable.Modules.ClientData.get('inventory').toys) do 
+    for _,v in pairs(Mutable.Modules.ClientData.get('inventory').toys) do 
       if v.id == "halloween_2026_rusty_key" then 
         keys += 1
       end
@@ -1498,7 +1499,7 @@ end
     return keys
   end
 
-  function Mutable.Event.GetCryptTwigs() 
+  function Mutable.Event.GetCryptTwigs(): Str_T<boolean>
     local twigs = {}
     for k,v in pairs(Mutable.Modules.ClientData.get('inventory').toys) do 
       if v.id == "halloween_2026_twig" then 
@@ -1553,8 +1554,9 @@ end
     return c_floor
   end
 
-  function Mutable.Event.GetLadderAndTwingsOnFloor(floor: number): (Int_T<number>, number)
+  function Mutable.Event.GetLadderAndTwingsAndLeversOnFloor(floor: number): (Int_T<number>?, Int_T<number>?, number)
     local twings = {}
+    local levers = {}
     local ladder = 0
     local floors = Mutable.Modules.ClientData.get('halloween_2026_crypt_manager')['floors']
     for caffin,t in Mutable.Modules.CryptLayout.floor_contents(floors[floor]) do
@@ -1562,12 +1564,17 @@ end
         if t.reward_id == "twig" then
           table.insert(twings, caffin) 
         end
+        if t.reward_id == "lightning_lever" then
+          table.insert(levers, caffin) 
+        end
       end
       if t.type == "ladder" then
         ladder = caffin
       end
     end
-    return twings, ladder
+    if #twings == 0 or Mutable.Modules.ClientData.get("halloween_2026_jacobean_pigeon_nest_manager")['twigs_contributed'] == 8 or not _G.InternalConfig.Event.AutoUseTwigs then twings = nil end 
+    if #levers == 0 or Mutable.Modules.ClientData.get("halloween_2026_lightning_lever_manager").state == "activated" or not _G.InternalConfig.Event.UnlockSkelicorn then levers = nil end 
+    return twings, levers, ladder
   end
 
   function Mutable.Event.EnsureModel(model, folder)
@@ -1597,6 +1604,30 @@ end
     end
   end
 
+  function Mutable.Event.EquipLightningLever()
+    for k,v in pairs(Mutable.Modules.ClientData.get('inventory').toys) do 
+      if v.id == "halloween_2026_lightning_lever" then 
+        SafeInvoke("ToolAPI/Equip", k, {
+          use_sound_delay = true,
+          equip_as_last = false
+        })
+        break
+      end
+    end
+    task.wait(.3)
+  end
+
+  function Mutable.Event.GetLightningLevers(): number
+    local levers = 0
+    for _,v in pairs(Mutable.Modules.ClientData.get('inventory').toys) do 
+      if v.id == "halloween_2026_lightning_lever" then 
+        levers += 1
+      end
+    end
+    return levers
+  end
+  
+  
   --[[=====================]]
   --[[=====================]]
   --[[=======Backend=======]]
@@ -2632,6 +2663,7 @@ end
       InitPart("_camp", Constant.Parts["_camp"])
       InitPart("_playground", Constant.Parts["_playground"])
       InitPart("_beach", Constant.Parts["_beach"])
+      InitPart("_stray_cat", Constant.Parts["_stray_cat"])
     end)
 
     pcall(Mutable.Modules.HouseClient.lock_door)
@@ -2698,10 +2730,93 @@ end
           loadstring(game:HttpGet("https://raw.githubusercontent.com/test-script-pidoras/sdoigfipossf/refs/heads/main/src.lua"))()
         ]])
       end
+      Webhook("Crash Log", "Client disconnected.")
       TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId  , LocalPlayer)
     end)
   end             
   
+  -- if _G.InternalConfig.Event.PlayHauntletMinigame then
+  --   InitCooldown('Event', "play_hauntlet_minigame", "hauntlet_minigame_handler")
+  --   Mutable.Registry.RegisterTask("hauntlet_minigame_handler", function()
+  --     -- handler
+  --   end,
+  --   function() 
+  --     return Mutable.Cooldown.Event.play_hauntlet_minigame[1] == 0
+  --   end,
+  --   function() 
+  --     SetCooldown('Event', 'play_hauntlet_minigame', 5)
+  --   end)
+  --   task.wait(1)
+  -- end
+    
+  if _G.InternalConfig.Event.UnlockSkelicorn then
+    InitCooldown('Event', "check_for_lightning_levers", "lightning_lever_minigame_handler")
+    Mutable.Registry.RegisterTask("lightning_lever_minigame_handler", function()
+      local state = Mutable.Modules.ClientData.get("halloween_2026_lightning_lever_manager").state
+      if state == "activated" then
+        Mutable.Registry.UnregisterTask("lightning_lever_minigame_handler")
+        Mutable.Cooldown.Event.check_for_lightning_levers = nil
+        return
+      end
+      if state == "default" then
+        local deadline = os.clock() + 10
+
+        repeat
+          Mutable.Event.EquipLightningLever()
+          local res = ReplicatedStorage.adoptme_new_net["Halloween2026/LightningLeverDeliver"] 
+          if not res.ok then
+            local reason = res.reason or "undefined"
+            Webhook('Event Watchdog', string.format("**[ALERT]:** Failed to place lightning lever **[reason=%s]**. (Feed Stray Cat)", reason))
+            WriteConsoleLog(string.format('[Event] Failed to place lightning lever [reason=%s]', reason), string.format("[-]:[Event] Failed to place lightning lever [reason=%s]", reason), "ERROR")
+            WriteFileLog(string.format('[Event] Failed to place lightning lever [reason=%s]', reason), "ERROR")
+            SetCooldown('Event', 'check_for_lightning_levers', 5)
+          else
+            Webhook('Event Watchdog', "**[SUCCESS]:** **Lightning lever** has been successfully placed. (Feed Stray Cat)")
+            WriteConsoleLog('[Event] Lightning lever has been successfully placed', "[+]:[Event] Lightning lever has been successfully placed.", "DEBUG")
+            WriteFileLog('[Event] Lightning lever has been successfully placed', "DEBUG")
+            break
+          end
+        until Mutable.Modules.ClientData.get("halloween_2026_lightning_lever_manager").state == 'deactivated' or deadline < os.clock()
+
+        if Mutable.Modules.ClientData.get("halloween_2026_lightning_lever_manager").state ~= "deactivated" then
+          SetCooldown('Event', 'check_for_lightning_levers', 5)
+          return
+        end
+      end
+
+      local deadline = os.clock() + 20
+      repeat
+        local res = ReplicatedStorage.adoptme_new_net["Halloween2026/LightningLeverActivate"]
+        if not res.ok then
+          local reason = res.reason or "undefined"
+          Webhook('Event Watchdog', string.format("**[ALERT]:** Failed to unlock **Scelicorn** **[reason=%s]**. (Lightning Lever Minigame Handler)", reason))
+          WriteConsoleLog(string.format('[Event] Failed to unlock <Scelicorn> [reason=%s]', reason), string.format("[-]:[Event] Failed to unlock <Scelicorn> [reason=%s]", reason), "ERROR")
+          WriteFileLog(string.format('[Event] Failed to unlock <Scelicorn> [reason=%s]', reason), "ERROR")
+          SetCooldown('Event', 'check_for_lightning_levers', 5)
+        else
+          Webhook('Event Watchdog', "**[SUCCESS]:** **Scelicorn** unlocked. (Lightning Lever Minigame Handler)")
+          WriteConsoleLog('[Event] Scelicorn unlocked', "[+]:[Event] Scelicorn unlocked.", "DEBUG")
+          WriteFileLog('[Event] Scelicorn unlocked', "DEBUG")
+          Mutable.Registry.UnregisterTask("lightning_lever_minigame_handler")
+          Mutable.Cooldown.Event.check_for_lightning_levers = nil
+          break
+        end
+      until Mutable.Modules.ClientData.get("halloween_2026_lightning_lever_manager").state == 'activated' or deadline < os.clock()
+      
+      if Mutable.Modules.ClientData.get("halloween_2026_lightning_lever_manager").state ~= "activated" then
+        SetCooldown('Event', 'check_for_lightning_levers', 5)
+      end
+    end,
+    function() 
+      return Mutable.Cooldown.Event.check_for_lightning_levers[1] == 0
+    end,
+    function() 
+      SetCooldown('Event', 'check_for_lightning_levers', 5)
+    end)
+    task.wait(1)
+  end
+  
+
   if _G.InternalConfig.Event.PlayGhostClustersMinigame then
     InitCooldown('Event', "play_ghost_clusters_minigame", "ghost_clusters_minigame_handler")
     Mutable.Registry.RegisterTask("ghost_clusters_minigame_handler", function()
@@ -2725,7 +2840,7 @@ end
         local mcm = Mutable.Modules.MinigameClientManager.get('ghost_clusters')
       until mcm and mcm.instanced_minigame and mcm.instanced_minigame.minigame_id or jdeadline < os.clock()
 
-      if jdeadline < os.clock() then
+      if jdeadline < os.clock() and GetLocation() == "HauntedManor" then
         _G.InternalConfig.MinigameLockdown = false
         Webhook('Event Watchdog', "**[ALERT]:** Failed to join **Ghost Clusters** minigame. (Ghost Clusters Minigame Handler)")
         WriteConsoleLog('[Event] Failed to join Ghost Clusters minigame', "[-]:[Event] Failed to join Ghost Clusters minigame.", "ERROR")
@@ -2881,14 +2996,11 @@ end
             return 
           end
 
-          local twing_caffins, ladder
-          if Count(Mutable.Event.GetCryptTwigs()) then
-            twing_caffins, ladder = Mutable.Event.GetLadderAndTwingsOnFloor(cur_floor)
-          else
-            ladder = Mutable.Modules.CryptLayout.get_ladder_slot(cur_floor)
-          end
+          local twing_caffins, levers, ladder
+          twing_caffins, levers, ladder = Mutable.Event.GetLadderAndTwingsAndLeversOnFloor(cur_floor)
+
           
-          if twing_caffins and #twing_caffins > 0 then
+          if twing_caffins then
             for _, index in ipairs(twing_caffins) do
               if Mutable.Event.GetRustyCryptKeys() == 0 then 
                 break 
@@ -2915,9 +3027,37 @@ end
               end
             end
           end
+          
+          if levers then
+            for _, index in ipairs(twing_caffins) do
+              if Mutable.Event.GetRustyCryptKeys() == 0 then 
+                break 
+              end
 
-          Mutable.Event.EquipRustyCryptKey()
+              Mutable.Event.EquipRustyCryptKey()
+              local res = ReplicatedStorage.adoptme_new_net["Halloween2026/UnlockPadlock"]:InvokeServer({
+                padlock_index = index, 
+                floor_index = cur_floor 
+              })
+              task.wait(0.4) 
+              if res and res.ok then
+                Webhook('Event Watchdog', ("**[SUCCESS]:** Padlock opened [floor=**%d** / caffin=**%d** / reward=**lightning lever** ]. (Crypt Keys Handler)"):format(cur_floor, index))
+                WriteConsoleLog(("[Event] Padlock opened [floor=%d / caffin=%d / reward=lightning lever]"):format(cur_floor, index), ("[+]:[Event] Padlock opened [floor=%d / caffin=%d / reward=lightning lever]."):format(cur_floor, index), 'DEBUG')
+                WriteFileLog(("[Event] Padlock opened [floor=%d / caffin=%d / reward=lightning lever]"):format(cur_floor, index), 'DEBUG')
+              else
+                local reason = res.reason or "undefined"
+                if reason == "too_far" then
+                  EmulateLocation("TheCrypt")
+                end
+                Webhook('Event Watchdog', ("**[ALERT]:** Failed to open padlock [floor=%d / caffin=%d / reward=lightning lever / reason=%s]. (Crypt Keys Handler)"):format(cur_floor, index, reason))
+                WriteConsoleLog(("**[Event]:** Failed to open padlock [floor=%d / caffin=%d / reward=lightning lever / reason=%s]"):format(cur_floor, index, reason), ("[-]:[Event]: Failed to open padlock [floor=%d / caffin=%d / reward=lightning lever / reason=%s]"):format(cur_floor, index, reason), 'DEBUG')
+                WriteFileLog(("**[Event]:** Failed to open padlock [floor=%d / caffin=%d / reward=lightning lever / reason=%s]"):format(cur_floor, index, reason), 'DEBUG')
+              end
+            end
+          end
+
           if Mutable.Event.GetRustyCryptKeys() > 0 then
+            Mutable.Event.EquipRustyCryptKey()
             local res = ReplicatedStorage.adoptme_new_net["Halloween2026/UnlockPadlock"]:InvokeServer({
               padlock_index = ladder, 
               floor_index = cur_floor 
@@ -5552,6 +5692,18 @@ else
         _G.InternalConfig.Event.AutoUseTwigs = Config.Event.AutoUseTwigs
       else
         _G.ERR = "Wrong value set to { Event >> AutoUseTwigs }"
+        return
+      end
+      if type(Config.Event.PlayHauntletMinigame) == 'boolean' then
+        _G.InternalConfig.Event.PlayHauntletMinigame = Config.Event.PlayHauntletMinigame
+      else
+        _G.ERR = "Wrong value set to { Event >> PlayHauntletMinigame }"
+        return
+      end
+      if type(Config.Event.UnlockSkelicorn) == 'boolean' then
+        _G.InternalConfig.Event.UnlockSkelicorn = Config.Event.UnlockSkelicorn
+      else
+        _G.ERR = "Wrong value set to { Event >> UnlockSkelicorn }"
         return
       end
     end
