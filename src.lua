@@ -72,7 +72,7 @@ _G.EXEC += 1
 
 local StarterGui = game:GetService("StarterGui")
 local HttpService = game:GetService("HttpService")
-local request = request or http_request or (syn and syn.request) or (http and http.request)
+local request = request or http_request or (syn and syn.request) or (http and http.request) or function(...) return end
 
 local function __Notify(title: string, text: string, duration: number, force: boolean)
   if force or _G.InternalConfig.UtilitiesDLib.GUINotifications then 
@@ -351,7 +351,6 @@ local _script = coroutine.create(function()
 
     Event = {},
   }
-_G.Furn = Mutable.Furn
 
   --[[=====================]]
   --[[=====================]]
@@ -386,6 +385,7 @@ _G.Furn = Mutable.Furn
   local ReplicatedStorage = game:GetService("ReplicatedStorage")
   local VirtualUser = game:GetService("VirtualUser")
   local HttpService = game:GetService("HttpService")
+  local LocalizationService = game:GetService("LocalizationService")
   local UIS = game:GetService("UserInputService")
   local LocalPlayer = game:GetService("Players").LocalPlayer
 
@@ -746,21 +746,22 @@ _G.Furn = Mutable.Furn
       local id = v.id:lower()
 
       if id:match("basicbed") and not bed.unique then 
+        print("[+] Bed found.")
         bed.unique = k
-        print('bed found.')
       elseif id:match("cheap_pet_bathtub") and not bath.unique then
+        print("[+] Bath found.")
         bath.unique = k
-        print('bath found.')
       elseif id:match("ailments_refresh_2024_litter_box") and not toilet.unique then
+        print("[+] Toilet found.")
         toilet.unique = k
-        print('toilet found.')
       elseif id:match("lures_2023_normal_lure") and not lurebox.unique then
+        print("[+] Lurebox found.")
         lurebox.unique = k
-        print('lurebox found.')
       end
       if bed.unique and bath.unique and toilet.unique and lurebox.unique then break end
     end
     if not bed.unique then
+      print("[-] Bed not found. Buying..")
       SafeInvoke("HousingAPI/BuyFurnitures",
         {
           {
@@ -773,6 +774,7 @@ _G.Furn = Mutable.Furn
       )
     end
     if not bath.unique then
+      print("[-] Bath not found. Buying..")
       SafeInvoke("HousingAPI/BuyFurnitures",
         {
           {
@@ -785,6 +787,7 @@ _G.Furn = Mutable.Furn
       )
     end
     if not toilet.unique then
+      print("[-] Toilet not found. Buying..")
       SafeInvoke("HousingAPI/BuyFurnitures",
         {
           {
@@ -797,6 +800,7 @@ _G.Furn = Mutable.Furn
       )
     end
     if not lurebox.unique then
+      print("[-] Lurebox not found. Buying..")
       SafeInvoke("HousingAPI/BuyFurnitures",
         {
           {
@@ -1336,13 +1340,18 @@ end
     return { selected_age, selected_tiny, }, { expected_big_age, expected_tiny_age, }
   end
 
+  local function Translate(text: string): string
+    local translator = LocalizationService:GetTranslatorForLocaleAsync('en')
+    return translator:Translate(game, text)
+  end
+
   local function SendTradeRequest(user: Player): string?  
     local deadline = os.clock() + 120
     local declined = false
     local cooldown = false
     local doesnt_accept = false
     local ev = Mutable.Modules.API["MsgAPI/HintSent"].OnClientEvent:Connect(function(...)
-      local text = select(1, ...)["text"]
+      local text = Translate(select(1, ...)["text"])
       if text:match("declined your trade request.") then
         declined = true
       elseif text:match("Try again in ") then
@@ -2600,6 +2609,7 @@ end
 
       Mutable.Modules.UIManager.set_app_visibility("StarRewardsApp", false)
       SafeFire("PayAPI/DisablePopups")
+
     end)
 
     _InitHandler(function() 
@@ -2872,7 +2882,7 @@ end
           end
 
           local twing_caffins, ladder
-          if Mutable.Modules.ClientData.get("halloween_2026_jacobean_pigeon_nest_manager")['twigs_contributed'] then
+          if Count(Mutable.Event.GetCryptTwigs()) then
             twing_caffins, ladder = Mutable.Event.GetLadderAndTwingsOnFloor(cur_floor)
           else
             ladder = Mutable.Modules.CryptLayout.get_ladder_slot(cur_floor)
@@ -2889,7 +2899,7 @@ end
                 padlock_index = index, 
                 floor_index = cur_floor 
               })
-              task.wait(0.3) 
+              task.wait(0.4) 
               if res and res.ok then
                 Webhook('Event Watchdog', ("**[SUCCESS]:** Padlock opened [floor=**%d** / caffin=**%d** / reward=**twig** ]. (Crypt Keys Handler)"):format(cur_floor, index))
                 WriteConsoleLog(("[Event] Padlock opened [floor=%d / caffin=%d / reward=twig]"):format(cur_floor, index), ("[+]:[Event] Padlock opened [floor=%d / caffin=%d / reward=twig]."):format(cur_floor, index), 'DEBUG')
@@ -2970,38 +2980,47 @@ end
         Mutable.Cooldown.Event.try_use_twigs_after = nil
         return
       end
-
       local twigs = Mutable.Event.GetCryptTwigs()
-
+    
       if Count(twigs) == 0 then
         WriteConsoleLog("[Event] No twigs found", "[Event] No twigs found.", "DEBUG")
         WriteFileLog("[Event] No twigs found" ,"DEBUG")
         SetCooldown('Event', 'try_use_twigs_after', 120)
         return 
-      end
-      
-      for k,_ in twigs do
-        local count = Mutable.Modules.ClientData.get("halloween_2026_jacobean_pigeon_nest_manager")['twigs_contributed']
-        if count == 8 then 
-          break 
+      end  
+
+      local _task = Mutable.LocationQueue.Enqueue(function()
+        EmulateLocation("HauntedHotel")
+                
+        for k,_ in twigs do
+          local count = Mutable.Modules.ClientData.get("halloween_2026_jacobean_pigeon_nest_manager")['twigs_contributed']
+          if count == 8 then 
+            break 
+          end
+          local res = ReplicatedStorage.adoptme_new_net["Halloween2026/JacobeanPigeonNestContributeTwig"]:InvokeServer(
+            {
+              unique = k
+            }
+          )
+          task.wait(.2)
+          if not res.ok then
+            local reason = res.reason or "undefined"
+            if reason == "too_far" then
+              EmulateLocation("HauntedHotel")
+            end
+            Webhook('Event Watchdog', string.format("**[ALERT]:** Failed to contribute twig **[reason=%s]**. (Hotel Twigs Handler)", reason))
+            WriteConsoleLog(string.format('[Event] Failed to contribute twig [reason=%s]', reason), string.format("[-]:[Event] Failed to contribute twig [reason=%s]", reason), "ERROR")
+            WriteFileLog(string.format('[Event] Failed to contribute twig [reason=%s]', reason), "ERROR")
+          else
+            Webhook('Event Watchdog', "**[SUCCESS]:** twig placed. (Hotel Twigs Handler)")
+            WriteConsoleLog('[Event] twig placed', "[+]:[Event] Stray cat has been fed.", "DEBUG")
+            WriteFileLog('[Event] twig placed', "DEBUG")
+          end
         end
-        local res = ReplicatedStorage.adoptme_new_net["Halloween2026/JacobeanPigeonNestContributeTwig"]:InvokeServer(
-          {
-            unique = k
-          }
-        )
-        task.wait(.2)
-        if not res.ok then
-          local reason = res.reason or "undefined"
-          Webhook('Event Watchdog', string.format("**[ALERT]:** Failed to contribute twig **[reason=%s]**. (Hotel Twigs Handler)", reason))
-          WriteConsoleLog(string.format('[Event] Failed to contribute twig [reason=%s]', reason), string.format("[-]:[Event] Failed to contribute twig [reason=%s]", reason), "ERROR")
-          WriteFileLog(string.format('[Event] Failed to contribute twig [reason=%s]', reason), "ERROR")
-        else
-          Webhook('Event Watchdog', "**[SUCCESS]:** twig placed. (Hotel Twigs Handler)")
-          WriteConsoleLog('[Event] twig placed', "[+]:[Event] Stray cat has been fed.", "DEBUG")
-          WriteFileLog('[Event] twig placed', "DEBUG")
-        end
-      end
+      end)
+      while not _task.completed do
+        task.wait(1)
+      end      
       SetCooldown('Event', 'try_use_twigs_after', 2)
     end,
     function() 
@@ -4548,7 +4567,6 @@ end
     task.wait(1)
   end
 end)
-
 
 if _G.EXEC > 1 then
   __Notify("Warning", "Arcanic is already injected. Relaunch for re-execute.", 6)
